@@ -1,48 +1,99 @@
 import argparse
 import numpy as np
 import tensorflow.compat.v1 as tf
-import tf_slim as slim
 import time
 
 from data import Cifar10
 from utils import save_cfg_to_yaml, load_cfg_from_yaml, merge_cfg_from_args
 from model import resnet_v2
 
+tf.set_random_seed(99)
+
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Inference")
-    parser.add_argument("--policy-lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument("--policy-lr", type=float, default=5e-4, help="learning rate")
     args = parser.parse_args()
 
     config_dict = load_cfg_from_yaml('config/CIFAR10/R_50.yaml')
     config_dict = merge_cfg_from_args(config_dict, args)
     lr = config_dict["policy_lr"]
-    BATCH_SIZE = config_dict['TRAIN']['BATCH_SIZE']
     MAX_EPOCH = config_dict['TRAIN']['MAX_EPOCH']
-    TEST_BATCH = config_dict['TEST']['BATCH_SIZE']
 
-    with tf.Session() as sess:
+    config = tf.ConfigProto(
+        log_device_placement=True,  # log the GPU or CPU device that is assigned to an operation
+        allow_soft_placement=True  # use soft constraints for the device placement
+    )
+    with tf.Session(config=config) as sess:
         # input for resnet
-        tf_x = tf.placeholder('float', [None, 32, 32, 3])
-        tf_y = tf.placeholder('float', [None, 10])
+        tf_x = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3], name='tf_x')
+        tf_y = tf.placeholder(dtype=tf.float32, shape=[None, 10], name='tf_y')
         # output of resnet
-        # with slim.arg_scope(resnet_v2.resnet_arg_scope()):
-        resnet_out, end_points = resnet_v2.resnet_v2_50(tf_x, 10, is_training=False)
-
-        # loss = tf.reduce_mean(-tf.reduce_sum(tf_y * tf.log(resnet_out)))
-        loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=resnet_out, labels=tf_y))
-        tf.summary.scalar('loss', loss)
-        train_step = tf.train.AdamOptimizer(lr).minimize(loss)
+        resnet_out, end_points = resnet_v2.resnet_v2_50(tf_x, num_classes=10, is_training=False)
+        # loss
+        cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=resnet_out, labels=tf_y))
+        # tf_loss_summary = tf.summary.scalar('loss', cross_entropy_loss)
+        # optimizer
+        tf_lr = tf.placeholder(tf.float32, shape=None, name='learning_rate')  # more flexible learning rate
+        optimizer = tf.train.AdamOptimizer(tf_lr)
+        grads_and_vars = optimizer.compute_gradients(cross_entropy_loss)
+        train_step = optimizer.minimize(cross_entropy_loss)
 
         correct_prediction = tf.equal(tf.argmax(resnet_out, 1), tf.argmax(tf_y, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-        tf.summary.scalar('accuracy', accuracy)
+        # tf_accuracy_summary = tf.summary.scalar('accuracy', accuracy)
 
         # initialize variables
         sess.run(tf.global_variables_initializer())
 
-        # separate tensorboard
-        merge_op = tf.summary.merge_all()
+        # Name scope allows you to group various summaries together
+        # Summaries having the same name_scope will be displayed on the same row
+        with tf.name_scope('performance'):
+            # Summaries need to be displayed
+            # Whenever you need to record the loss, feed the mean loss to this placeholder
+            tf_loss_ph = tf.placeholder(tf.float32, shape=None, name='loss_summary')
+            # Create a scalar summary object for the loss so it can be displayed
+            tf_loss_summary = tf.summary.scalar('loss', tf_loss_ph)
+
+            # Whenever you need to record the loss, feed the mean test accuracy to this placeholder
+            tf_accuracy_ph = tf.placeholder(tf.float32, shape=None, name='accuracy_summary')
+            # Create a scalar summary object for the accuracy so it can be displayed
+            tf_accuracy_summary = tf.summary.scalar('accuracy', tf_accuracy_ph)
+
+        # Gradient norm summary
+        # tf_gradnorm_summary: this calculates the l2 norm of the gradients of the last layer
+        # of your neural network. Gradient norm is a good indicator of whether the weights of
+        # the neural network are being properly updated. A too small gradient norm can indicate
+        # vanishing gradient or a too large gradient can imply exploding gradient phenomenon.
+        t_layer = len(grads_and_vars) - 2
+        for i_layer, (g, v) in enumerate(grads_and_vars):
+            if i_layer == t_layer:
+                with tf.name_scope('gradients_norm'):
+                    tf_last_grad_norm = tf.sqrt(tf.reduce_mean(g ** 2))
+                    tf_gradnorm_summary = tf.summary.scalar('grad_norm', tf_last_grad_norm)
+                    break
+
+        # A summary for each weight in each layer of ResNet50
+        all_summaries = []
+        for weight_name in end_points:
+            try:
+                name_scope = weight_name.split("bottleneck_v2/")[0] + weight_name.split("bottleneck_v2/")[1]
+            except:
+                name_scope = weight_name.split("bottleneck_v2/")[0]
+            with tf.name_scope(name_scope):
+                weight = end_points[weight_name]
+                # Create a scalar summary object for the loss so it can be displayed
+                tf_w_hist = tf.summary.histogram('weights_hist', tf.reshape(weight, [-1]))
+                all_summaries.append([tf_w_hist])
+        # Merge all parameter histogram summaries together
+        tf_weight_summaries = tf.summary.merge(all_summaries)
+
+        # Merge all summaries together
+        # the following two statements are equal
+        # [1] merge_op = tf.summary.merge_all()
+        # [2] merge_op = tf.summary.merge([tf_loss_summary, tf_accuracy_summary, tf_gradnorm_summary])
+        merge_op = tf.summary.merge([tf_loss_summary, tf_accuracy_summary])
+        # separate tensorboard, i.e., one log file, one folder.
         train_writer = tf.summary.FileWriter('logs/train', sess.graph)
         test_writer = tf.summary.FileWriter('logs/test', sess.graph)
 
@@ -51,54 +102,47 @@ def main():
         test_images, test_labels = cifar10_data.test_data()
 
         # training
-        start_time = time.time()
+        # start_time = time.time()
         batch_counter = 0
         while cifar10_data.epochs_completed < MAX_EPOCH:
             batch_xs, batch_ys = cifar10_data.next_train_batch()
             batch_counter += 1
-            sess.run(train_step, feed_dict={tf_x: batch_xs, tf_y: batch_ys})
+            sess.run(train_step, feed_dict={tf_x: batch_xs, tf_y: batch_ys, tf_lr: lr})
 
+            # calculate the train_accuracy for one batch
             if batch_counter % 100 == 0:
-                # calculate the train_accuracy:
-                train_accuracy = accuracy.eval(feed_dict={tf_x: batch_xs, tf_y: batch_ys})
-                print("epoch {} batch {}, training accuracy {}".
-                      format(cifar10_data.epochs_completed, batch_counter, train_accuracy))
+                train_accuracy, loss = sess.run(
+                    [accuracy, cross_entropy_loss], feed_dict={tf_x: batch_xs, tf_y: batch_ys, tf_lr: lr})
+                train_summary = sess.run(
+                    merge_op, feed_dict={tf_loss_ph: loss, tf_accuracy_ph: train_accuracy, tf_lr: lr})
+                train_writer.add_summary(train_summary, batch_counter)
+                print("epoch {} batch {} training accuracy {} loss {}".
+                      format(cifar10_data.epochs_completed, batch_counter, train_accuracy, loss))
 
-                result = sess.run(merge_op, {tf_x: batch_xs, tf_y: batch_ys})
-                train_writer.add_summary(result, batch_counter)
+                # end_time = time.time()
+                # print("time: {}".format(end_time - start_time))
+                # start_time = end_time
 
-                end_time = time.time()
-                print('time: ', (end_time - start_time))
-                start_time = end_time
+            # calculate the gradient norm summary and weight histogram
+            if batch_counter % 100 == 0:
+                gn_summary, wb_summary = sess.run(
+                    [tf_gradnorm_summary, tf_weight_summaries], feed_dict={tf_x: batch_xs, tf_y: batch_ys, tf_lr: lr})
+                train_writer.add_summary(gn_summary, batch_counter)
+                train_writer.add_summary(wb_summary, batch_counter)
 
             # calculate the test_accuracy
             if batch_counter % 1000 == 0:
                 # Test_accuracy
-                test_accuracy = 0
-                n_batch = int(test_images.shape[0] / TEST_BATCH)
-                for j in range(n_batch):
-                    test_accuracy += accuracy.eval(
-                        feed_dict={tf_x: test_images[j * TEST_BATCH:(j + 1) * TEST_BATCH],
-                                   tf_y: test_labels[j * TEST_BATCH:(j + 1) * TEST_BATCH]})
-                test_accuracy /= n_batch
-                print("test accuracy {}".format(test_accuracy))
-
-                _, result = sess.run(
-                    [train_step, merge_op],
-                    feed_dict={
-                        tf_x: test_images[j * BATCH_SIZE:(j + 1) * BATCH_SIZE],
-                        tf_y: test_labels[j * BATCH_SIZE:(j + 1) * BATCH_SIZE]})
-                test_writer.add_summary(result, batch_counter)
+                test_accuracy, test_loss = sess.run(
+                    [accuracy, cross_entropy_loss], feed_dict={tf_x: test_images, tf_y: test_labels, tf_lr: lr})
+                test_summary = sess.run(
+                    merge_op, feed_dict={tf_loss_ph: test_loss, tf_accuracy_ph: test_accuracy, tf_lr: lr})
+                test_writer.add_summary(test_summary, batch_counter)
+                print("----- test accuracy {} test loss {}".format(test_accuracy, test_loss))
 
         # Overall test accuracy
-        test_accuracy = 0
-        n_batch = int(test_images.shape[0] / TEST_BATCH)
-        for j in range(n_batch):
-            test_accuracy += accuracy.eval(
-                feed_dict={tf_x: test_images[j * TEST_BATCH:(j + 1) * TEST_BATCH],
-                           tf_y: test_labels[j * TEST_BATCH:(j + 1) * TEST_BATCH]})
-        test_accuracy /= n_batch
-        print("test accuracy {}".format(test_accuracy))
+        overall_accuracy = accuracy.eval(feed_dict={tf_x: test_images, tf_y: test_labels, tf_lr: lr})
+        print("\nOverall test accuracy {}".format(overall_accuracy))
 
         save_cfg_to_yaml(config_dict, 'logs/current_config.yaml')
 
