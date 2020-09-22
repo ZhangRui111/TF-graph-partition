@@ -1,0 +1,5 @@
+**/__pycache__/
+**/.idea/
+logs/
+CIFAR10/
+MNIST/
