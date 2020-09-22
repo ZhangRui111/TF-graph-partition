@@ -1,5 +1,7 @@
 **/__pycache__/
 **/.idea/
 logs/
-CIFAR10/
+CIFAR10/cifar-10-batches-bin/
 MNIST/
+
+*.tar.gz
