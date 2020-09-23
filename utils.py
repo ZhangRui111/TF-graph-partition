@@ -1,3 +1,4 @@
+import tensorflow.compat.v1 as tf
 import yaml
 
 
@@ -21,6 +22,33 @@ def merge_cfg_from_args(cfg_as_dict, args):
     for item in args._get_kwargs():
         cfg_as_dict[item[0]] = item[1]
     return cfg_as_dict
+
+
+def next_device(current_dev_id, config_dict, use_cpu=False):
+    """
+    See if there is available next device;
+    :param current_dev_id: current device id
+    :param use_cpu: use_cpu, global device_id
+    :return: new device id
+    """
+    if use_cpu:
+        if (current_dev_id + 1) < config_dict['num_cpu_core']:
+            current_dev_id += 1
+        device_id = '/cpu:%d' % current_dev_id
+    else:
+        if (current_dev_id + 1) < config_dict['num_gpu_core']:
+            current_dev_id += 1
+        device_id = '/gpu:%d' % current_dev_id
+    print("----- Current device id: {}".format(device_id))
+    return device_id
+
+
+def data_type(use_fp16):
+    """ Return the type of the activations, weights, and placeholder variables. """
+    if use_fp16:
+        return tf.float16
+    else:
+        return tf.float32
 
 
 # def main():

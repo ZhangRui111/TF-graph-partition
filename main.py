@@ -1,40 +1,65 @@
 import argparse
 import numpy as np
+import os
 import tensorflow.compat.v1 as tf
+import tf_slim as slim
+from tensorflow.python.client import device_lib
 import time
 
 from data import Cifar10
-from utils import save_cfg_to_yaml, load_cfg_from_yaml, merge_cfg_from_args
+from utils import save_cfg_to_yaml, load_cfg_from_yaml, merge_cfg_from_args, data_type, next_device
 from model import resnet_v2
 
+# os.environ["CUDA_VISIBLE_DEVICES"] = " "  # only use CPU for training
 tf.set_random_seed(99)
 
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Object Detection Inference")
     parser.add_argument("--policy-lr", type=float, default=5e-4, help="learning rate")
+    parser.add_argument("--num-cpu-core", type=int, default=4, help="Number of CPU cores to use")
+    parser.add_argument("--intra-op-parallelism-threads", type=int, default=4,
+                        help="How many ops can be launched in parallel")
+    parser.add_argument("--num-gpu-core", type=int, default=1, help="Number of GPU cores to use")
+    parser.add_argument("--use-fp16", default=False, action='store_true', help="whether use float16 as default")
     args = parser.parse_args()
+
+    print("Available devices:")
+    print(device_lib.list_local_devices())
 
     config_dict = load_cfg_from_yaml('config/CIFAR10/R_50.yaml')
     config_dict = merge_cfg_from_args(config_dict, args)
     lr = config_dict["policy_lr"]
+    intra_op_threads = config_dict['intra_op_parallelism_threads']
+    use_fp16 = config_dict['use_fp16']
+    cpu_num = config_dict["num_cpu_core"]
     MAX_EPOCH = config_dict['TRAIN']['MAX_EPOCH']
+    device_id = -1
 
     config = tf.ConfigProto(
         log_device_placement=True,  # log the GPU or CPU device that is assigned to an operation
         allow_soft_placement=True  # use soft constraints for the device placement
     )
+    # config = tf.ConfigProto(
+    #     # device_count limits the number of CPUs being used, not the number of cores or threads.
+    #     device_count={"CPU": cpu_num},
+    #     inter_op_parallelism_threads=cpu_num,  # parallel without each operation, i.e., reduce_sum
+    #     intra_op_parallelism_threads=cpu_num,  # parallel between multiple operations
+    #     log_device_placement=True
+    # )
     with tf.Session(config=config) as sess:
         # input for resnet
-        tf_x = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3], name='tf_x')
-        tf_y = tf.placeholder(dtype=tf.float32, shape=[None, 10], name='tf_y')
+        tf_x = tf.placeholder(dtype=data_type(use_fp16), shape=[None, 32, 32, 3], name='tf_x')
+        tf_y = tf.placeholder(dtype=data_type(use_fp16), shape=[None, 10], name='tf_y')
         # output of resnet
-        resnet_out, end_points = resnet_v2.resnet_v2_50(tf_x, num_classes=10, is_training=False)
+        with slim.arg_scope(resnet_v2.resnet_arg_scope()):
+            with tf.device(next_device(device_id, config_dict, use_cpu=False)):
+                resnet_out, end_points = resnet_v2.resnet_v2_50(tf_x, num_classes=10, is_training=False)
         # loss
         cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=resnet_out, labels=tf_y))
         # tf_loss_summary = tf.summary.scalar('loss', cross_entropy_loss)
         # optimizer
-        tf_lr = tf.placeholder(tf.float32, shape=None, name='learning_rate')  # more flexible learning rate
+        tf_lr = tf.placeholder(dtype=data_type(use_fp16), shape=None, name='learning_rate')  # more flexible learning rate
         optimizer = tf.train.AdamOptimizer(tf_lr)
         grads_and_vars = optimizer.compute_gradients(cross_entropy_loss)
         train_step = optimizer.minimize(cross_entropy_loss)
@@ -51,12 +76,12 @@ def main():
         with tf.name_scope('performance'):
             # Summaries need to be displayed
             # Whenever you need to record the loss, feed the mean loss to this placeholder
-            tf_loss_ph = tf.placeholder(tf.float32, shape=None, name='loss_summary')
+            tf_loss_ph = tf.placeholder(dtype=data_type(use_fp16), shape=None, name='loss_summary')
             # Create a scalar summary object for the loss so it can be displayed
             tf_loss_summary = tf.summary.scalar('loss', tf_loss_ph)
 
             # Whenever you need to record the loss, feed the mean test accuracy to this placeholder
-            tf_accuracy_ph = tf.placeholder(tf.float32, shape=None, name='accuracy_summary')
+            tf_accuracy_ph = tf.placeholder(dtype=data_type(use_fp16), shape=None, name='accuracy_summary')
             # Create a scalar summary object for the accuracy so it can be displayed
             tf_accuracy_summary = tf.summary.scalar('accuracy', tf_accuracy_ph)
 
@@ -102,7 +127,7 @@ def main():
         test_images, test_labels = cifar10_data.test_data()
 
         # training
-        # start_time = time.time()
+        start_time = time.time()
         batch_counter = 0
         while cifar10_data.epochs_completed < MAX_EPOCH:
             batch_xs, batch_ys = cifar10_data.next_train_batch()
@@ -116,12 +141,12 @@ def main():
                 train_summary = sess.run(
                     merge_op, feed_dict={tf_loss_ph: loss, tf_accuracy_ph: train_accuracy, tf_lr: lr})
                 train_writer.add_summary(train_summary, batch_counter)
-                print("epoch {} batch {} training accuracy {} loss {}".
+                print("----- epoch {} batch {} training accuracy {} loss {}".
                       format(cifar10_data.epochs_completed, batch_counter, train_accuracy, loss))
 
-                # end_time = time.time()
-                # print("time: {}".format(end_time - start_time))
-                # start_time = end_time
+                end_time = time.time()
+                print("time: {}".format(end_time - start_time))
+                start_time = end_time
 
             # calculate the gradient norm summary and weight histogram
             if batch_counter % 100 == 0:
