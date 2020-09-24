@@ -58,11 +58,10 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
 
 
 def tower_loss(scope):
-    """Calculate the total loss on a single tower running the CIFAR model.
-    Args:
-      scope: unique prefix string identifying the CIFAR tower, e.g. 'tower_0'
-    Returns:
-       Tensor of shape [] containing the total loss for a batch of data
+    """
+    Calculate the total loss on a single tower running the CIFAR model.
+    :param scope: unique prefix string identifying the CIFAR tower, e.g. 'tower_0'
+    :return: Tensor of shape [] containing the total loss for a batch of data
     """
     # Get images and labels for CIFAR-10.
     images, labels = cifar10.distorted_inputs()
@@ -101,14 +100,13 @@ def tower_loss(scope):
 
 
 def average_gradients(tower_grads):
-    """Calculate the average gradient for each shared variable across all towers.
+    """
+    Calculate the average gradient for each shared variable across all towers.
     Note that this function provides a synchronization point across all towers.
-    Args:
-      tower_grads: List of lists of (gradient, variable) tuples. The outer list
+    :param tower_grads: List of lists of (gradient, variable) tuples. The outer list
         is over individual gradients. The inner list is over the gradient
         calculation for each tower.
-    Returns:
-       List of pairs of (gradient, variable) where the gradient has been averaged
+    :return: List of pairs of (gradient, variable) where the gradient has been averaged
        across all towers.
     """
     average_grads = []
@@ -137,7 +135,7 @@ def average_gradients(tower_grads):
 
 
 def train():
-    """Train CIFAR-10 for a number of steps."""
+    """ Train CIFAR-10 for a number of steps. """
     with tf.Graph().as_default(), tf.device('/cpu:0'):
         # Create a variable to count the number of train() calls. This equals the
         # number of batches processed * FLAGS.num_gpus.

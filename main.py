@@ -15,12 +15,14 @@ tf.set_random_seed(99)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PyTorch Object Detection Inference")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--policy-lr", type=float, default=5e-4, help="learning rate")
-    parser.add_argument("--num-cpu-core", type=int, default=4, help="Number of CPU cores to use")
-    parser.add_argument("--intra-op-parallelism-threads", type=int, default=4,
-                        help="How many ops can be launched in parallel")
     parser.add_argument("--num-gpu-core", type=int, default=1, help="Number of GPU cores to use")
+    parser.add_argument("--num-cpu-core", type=int, default=4, help="Number of CPU cores to use")
+    parser.add_argument("--inter-op-parallelism-threads", type=int, default=4,
+                        help="0 means the system picks an appropriate number.")
+    parser.add_argument("--intra-op-parallelism-threads", type=int, default=4,
+                        help="0 means the system picks an appropriate number.")
     parser.add_argument("--use-fp16", default=False, action='store_true', help="whether use float16 as default")
     args = parser.parse_args()
 
@@ -31,6 +33,7 @@ def main():
     config_dict = merge_cfg_from_args(config_dict, args)
     lr = config_dict["policy_lr"]
     intra_op_threads = config_dict['intra_op_parallelism_threads']
+    inter_op_threads = config_dict['inter_op_parallelism_threads']
     use_fp16 = config_dict['use_fp16']
     cpu_num = config_dict["num_cpu_core"]
     gpu_num = config_dict["num_gpu_core"]
@@ -91,7 +94,7 @@ def main():
         # of your neural network. Gradient norm is a good indicator of whether the weights of
         # the neural network are being properly updated. A too small gradient norm can indicate
         # vanishing gradient or a too large gradient can imply exploding gradient phenomenon.
-        t_layer = len(grads_and_vars) - 2
+        t_layer = len(grads_and_vars) - 2  # index of the last layer
         for i_layer, (g, v) in enumerate(grads_and_vars):
             if i_layer == t_layer:
                 with tf.name_scope('gradients_norm'):
@@ -117,7 +120,7 @@ def main():
         # Merge all summaries together
         # the following two statements are equal
         # [1] merge_op = tf.summary.merge_all()
-        # [2] merge_op = tf.summary.merge([tf_loss_summary, tf_accuracy_summary, tf_gradnorm_summary])
+        # [2] merge_op = tf.summary.merge([tf_loss_summary, tf_accuracy_summary, tf_gradnorm_summary, ...])
         merge_op = tf.summary.merge([tf_loss_summary, tf_accuracy_summary])
         # separate tensorboard, i.e., one log file, one folder.
         train_writer = tf.summary.FileWriter('logs/train', sess.graph)
@@ -140,7 +143,7 @@ def main():
                 train_accuracy, loss = sess.run(
                     [accuracy, cross_entropy_loss], feed_dict={tf_x: batch_xs, tf_y: batch_ys, tf_lr: lr})
                 train_summary = sess.run(
-                    merge_op, feed_dict={tf_loss_ph: loss, tf_accuracy_ph: train_accuracy, tf_lr: lr})
+                    merge_op, feed_dict={tf_loss_ph: loss, tf_accuracy_ph: train_accuracy})
                 train_writer.add_summary(train_summary, batch_counter)
                 print("----- epoch {} batch {} training accuracy {} loss {}".
                       format(cifar10_data.epochs_completed, batch_counter, train_accuracy, loss))
@@ -162,7 +165,7 @@ def main():
                 test_accuracy, test_loss = sess.run(
                     [accuracy, cross_entropy_loss], feed_dict={tf_x: test_images, tf_y: test_labels, tf_lr: lr})
                 test_summary = sess.run(
-                    merge_op, feed_dict={tf_loss_ph: test_loss, tf_accuracy_ph: test_accuracy, tf_lr: lr})
+                    merge_op, feed_dict={tf_loss_ph: test_loss, tf_accuracy_ph: test_accuracy})
                 test_writer.add_summary(test_summary, batch_counter)
                 print("----- test accuracy {} test loss {}".format(test_accuracy, test_loss))
 

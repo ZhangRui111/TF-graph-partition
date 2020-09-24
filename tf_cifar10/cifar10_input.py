@@ -36,15 +36,15 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 10000
 
 
 def read_cifar10(filename_queue):
-    """Reads and parses examples from CIFAR10 data files.
-  Recommendation: if you want N-way read parallelism, call this function
-  N times.  This will give you N independent Readers reading different
-  files & positions within those files, which will give better mixing of
-  examples.
-  Args:
-    filename_queue: A queue of strings with the filenames to read from.
-  Returns:
-    An object representing a single example, with the following fields:
+    """
+    Reads and parses examples from CIFAR10 data files.
+    Recommendation: if you want N-way read parallelism, call this function
+    N times.  This will give you N independent Readers reading different
+    files & positions within those files, which will give better mixing of
+    examples.
+    :param filename_queue: A queue of strings with the filenames to read from.
+    :return:
+      An object representing a single example, with the following fields:
       height: number of rows in the result (32)
       width: number of columns in the result (32)
       depth: number of color channels in the result (3)
@@ -52,8 +52,7 @@ def read_cifar10(filename_queue):
         for this example.
       label: an int32 Tensor with the label in the range 0..9.
       uint8image: a [height, width, depth] uint8 Tensor with the image data
-  """
-
+    """
     class CIFAR10Record(object):
         pass
 
@@ -96,18 +95,18 @@ def read_cifar10(filename_queue):
 
 def _generate_image_and_label_batch(image, label, min_queue_examples,
                                     batch_size, shuffle):
-    """Construct a queued batch of images and labels.
-  Args:
-    image: 3-D Tensor of [height, width, 3] of type.float32.
-    label: 1-D Tensor of type.int32
-    min_queue_examples: int32, minimum number of samples to retain
+    """
+    Construct a queued batch of images and labels.
+    :param image: 3-D Tensor of [height, width, 3] of type.float32.
+    :param label: 1-D Tensor of type.int32
+    :param min_queue_examples: int32, minimum number of samples to retain
       in the queue that provides of batches of examples.
-    batch_size: Number of images per batch.
-    shuffle: boolean indicating whether to use a shuffling queue.
-  Returns:
-    images: Images. 4D tensor of [batch_size, height, width, 3] size.
-    labels: Labels. 1D tensor of [batch_size] size.
-  """
+    :param batch_size: Number of images per batch.
+    :param shuffle: boolean indicating whether to use a shuffling queue.
+    :return:
+      images: Images. 4D tensor of [batch_size, height, width, 3] size.
+      labels: Labels. 1D tensor of [batch_size] size.
+    """
     # Create a queue that shuffles the examples, and then
     # read 'batch_size' images + labels from the example queue.
     num_preprocess_threads = 16
@@ -132,14 +131,14 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
 
 
 def distorted_inputs(data_dir, batch_size):
-    """Construct distorted input for CIFAR training using the Reader ops.
-  Args:
-    data_dir: Path to the CIFAR-10 data directory.
-    batch_size: Number of images per batch.
-  Returns:
-    images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-    labels: Labels. 1D tensor of [batch_size] size.
-  """
+    """
+    Construct distorted input for CIFAR training using the Reader ops.
+    :param data_dir: Path to the CIFAR-10 data directory.
+    :param batch_size: Number of images per batch.
+    :return:
+      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+      labels: Labels. 1D tensor of [batch_size] size.
+    """
     filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i)
                  for i in xrange(1, 6)]
     for f in filenames:
@@ -189,15 +188,15 @@ def distorted_inputs(data_dir, batch_size):
 
 
 def inputs(eval_data, data_dir, batch_size):
-    """Construct input for CIFAR evaluation using the Reader ops.
-  Args:
-    eval_data: bool, indicating if one should use the train or eval data set.
-    data_dir: Path to the CIFAR-10 data directory.
-    batch_size: Number of images per batch.
-  Returns:
-    images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-    labels: Labels. 1D tensor of [batch_size] size.
-  """
+    """
+    Construct input for CIFAR evaluation using the Reader ops.
+    :param eval_data: bool, indicating if one should use the train or eval data set.
+    :param data_dir: Path to the CIFAR-10 data directory.
+    :param batch_size: Number of images per batch.
+    :return:
+      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+      labels: Labels. 1D tensor of [batch_size] size.
+    """
     if not eval_data:
         filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i)
                      for i in xrange(1, 6)]
