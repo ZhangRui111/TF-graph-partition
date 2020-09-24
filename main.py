@@ -33,20 +33,21 @@ def main():
     intra_op_threads = config_dict['intra_op_parallelism_threads']
     use_fp16 = config_dict['use_fp16']
     cpu_num = config_dict["num_cpu_core"]
+    gpu_num = config_dict["num_gpu_core"]
     MAX_EPOCH = config_dict['TRAIN']['MAX_EPOCH']
     device_id = -1
 
     config = tf.ConfigProto(
+        # device_count limits the number of CPUs being used, not the number of cores or threads.
+        device_count={'CPU': cpu_num, 'GPU': gpu_num},
+        inter_op_parallelism_threads=cpu_num,  # parallel without each operation, i.e., reduce_sum
+        intra_op_parallelism_threads=cpu_num,  # parallel between multiple operations
         log_device_placement=True,  # log the GPU or CPU device that is assigned to an operation
-        allow_soft_placement=True  # use soft constraints for the device placement
+        allow_soft_placement=True,  # use soft constraints for the device placement
     )
-    # config = tf.ConfigProto(
-    #     # device_count limits the number of CPUs being used, not the number of cores or threads.
-    #     device_count={"CPU": cpu_num},
-    #     inter_op_parallelism_threads=cpu_num,  # parallel without each operation, i.e., reduce_sum
-    #     intra_op_parallelism_threads=cpu_num,  # parallel between multiple operations
-    #     log_device_placement=True
-    # )
+    config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.9
+
     with tf.Session(config=config) as sess:
         # input for resnet
         tf_x = tf.placeholder(dtype=data_type(use_fp16), shape=[None, 32, 32, 3], name='tf_x')
@@ -123,7 +124,7 @@ def main():
         test_writer = tf.summary.FileWriter('logs/test', sess.graph)
 
         # get cifar10 dataset
-        cifar10_data = Cifar10('CIFAR10/', config=config_dict)
+        cifar10_data = Cifar10('dataset/CIFAR10/', config=config_dict)
         test_images, test_labels = cifar10_data.test_data()
 
         # training
